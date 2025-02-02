@@ -18,6 +18,48 @@ type Range struct {
 	end   int
 }
 
+func (r Range) IsFull() bool {
+	return r.begin == rangeEllipsis && r.end == rangeEllipsis
+}
+
+func compareRanges(r1 []Range, r2 []Range) bool {
+	if len(r1) != len(r2) {
+		return false
+	}
+	for idx := range r1 {
+		if r1[idx] != r2[idx] {
+			return false
+		}
+	}
+	return true
+}
+
+func RangesToString(ranges []Range) string {
+	strs := []string{}
+	for _, r := range ranges {
+		s := ""
+		if r.begin == rangeEllipsis && r.end == rangeEllipsis {
+			s = ".."
+		} else if r.begin == r.end {
+			s = strconv.Itoa(r.begin)
+		} else {
+			if r.begin != rangeEllipsis {
+				s += strconv.Itoa(r.begin)
+			}
+
+			if r.begin != -1 {
+				s += ".."
+				if r.end != rangeEllipsis {
+					s += strconv.Itoa(r.end)
+				}
+			}
+		}
+		strs = append(strs, s)
+	}
+
+	return strings.Join(strs, ",")
+}
+
 // Token contains the tokenized part of the strings and its prefix length
 type Token struct {
 	text         *util.Chars
@@ -41,7 +83,7 @@ func (d Delimiter) String() string {
 }
 
 func newRange(begin int, end int) Range {
-	if begin == 1 {
+	if begin == 1 && end != 1 {
 		begin = rangeEllipsis
 	}
 	if end == -1 {
@@ -73,7 +115,7 @@ func ParseRange(str *string) (Range, bool) {
 		}
 		begin, err1 := strconv.Atoi(ns[0])
 		end, err2 := strconv.Atoi(ns[1])
-		if err1 != nil || err2 != nil || begin == 0 || end == 0 {
+		if err1 != nil || err2 != nil || begin == 0 || end == 0 || begin < 0 && end > 0 {
 			return Range{}, false
 		}
 		return newRange(begin, end), true
@@ -91,7 +133,7 @@ func withPrefixLengths(tokens []string, begin int) []Token {
 
 	prefixLength := begin
 	for idx := range tokens {
-		chars := util.ToChars([]byte(tokens[idx]))
+		chars := util.ToChars(stringBytes(tokens[idx]))
 		ret[idx] = Token{&chars, int32(prefixLength)}
 		prefixLength += chars.Length()
 	}
@@ -156,14 +198,14 @@ func Tokenize(text string, delimiter Delimiter) []Token {
 	// FIXME performance
 	var tokens []string
 	if delimiter.regex != nil {
-		for len(text) > 0 {
-			loc := delimiter.regex.FindStringIndex(text)
-			if len(loc) < 2 {
-				loc = []int{0, len(text)}
-			}
-			last := util.Max(loc[1], 1)
-			tokens = append(tokens, text[:last])
-			text = text[last:]
+		locs := delimiter.regex.FindAllStringIndex(text, -1)
+		begin := 0
+		for _, loc := range locs {
+			tokens = append(tokens, text[begin:loc[1]])
+			begin = loc[1]
+		}
+		if begin < len(text) {
+			tokens = append(tokens, text[begin:])
 		}
 	}
 	return withPrefixLengths(tokens, 0)
@@ -187,7 +229,7 @@ func Transform(tokens []Token, withNth []Range) []Token {
 		if r.begin == r.end {
 			idx := r.begin
 			if idx == rangeEllipsis {
-				chars := util.ToChars([]byte(joinTokens(tokens)))
+				chars := util.ToChars(stringBytes(joinTokens(tokens)))
 				parts = append(parts, &chars)
 			} else {
 				if idx < 0 {
